@@ -1,0 +1,16 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: text-summarizer-ingress
+spec:
+  rules:
+  - host: text-summarizer.local
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: text-summarizer-service
+            port:
+              number: 80

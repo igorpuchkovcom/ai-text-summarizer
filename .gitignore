@@ -1,0 +1,28 @@
+.idea/workspace.xml
+.idea/misc.xml
+.idea/vcs.xml
+.idea/inspectionProfiles/profiles_settings.xml
+!.idea/modules.xml
+!.idea/runConfigurations/
+!.idea/codeStyles/
+!.idea/inspectionProfiles/Project_Default.xml
+
+# Terraform cache and state files
+.terraform/
+.terraform.lock.hcl
+terraform.tfstate
+terraform.tfstate.backup
+
+# Terraform provider binaries
+.terraform/providers/
+
+# Logs, caches, temp files
+__pycache__/
+*.log
+*.tmp
+.env
+
+# Any system-specific files
+.DS_Store
+/venv/
+/terraform.tfvars

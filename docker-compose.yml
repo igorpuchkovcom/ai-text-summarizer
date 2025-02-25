@@ -1,0 +1,9 @@
+services:
+  text-summarizer:
+    build: .
+    image: igorpuchkov/text-summarizer:latest
+    ports:
+      - "8000:8000"
+    environment:
+      - PYTHONUNBUFFERED=1
+    restart: always

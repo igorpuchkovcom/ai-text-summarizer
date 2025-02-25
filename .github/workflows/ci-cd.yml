@@ -1,0 +1,111 @@
+name: CI/CD for AI-Text-Summarizer
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  build-and-push:
+    name: Build and Push Docker Image
+    runs-on: ubuntu-latest
+    env:
+      DOCKER_IMAGE: ${{ vars.DOCKERHUB_USERNAME }}/${{ vars.APP_NAME }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ vars.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_PASSWORD }}
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v6
+        with:
+          push: true
+          tags: ${{ env.DOCKER_IMAGE }}:latest,${{ env.DOCKER_IMAGE }}:${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  deploy:
+    name: Deploy GKE Cluster
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Authenticate with Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+      - name: Set up Google Cloud SDK & kubectl
+        uses: google-github-actions/setup-gcloud@v2
+        with:
+          install_components: 'gke-gcloud-auth-plugin,kubectl'
+
+      - name: Ensure GCS Bucket Exists for Terraform State
+        run: |
+          if ! gsutil ls -b gs://${{ vars.TF_STATE_BUCKET }} >/dev/null 2>&1; then
+            echo "Bucket does not exist. Creating..."
+            gcloud storage buckets create gs://${{ vars.TF_STATE_BUCKET }} --location=${{ vars.GKE_REGION }} --default-storage-class=STANDARD
+          else
+            echo "Bucket already exists. Skipping creation."
+          fi
+
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v3
+
+      - name: Initialize Terraform with GCS Backend
+        run: |
+          terraform init \
+            -backend-config="bucket=${{ vars.TF_STATE_BUCKET }}" \
+            -backend-config="prefix=terraform/state"
+
+      - name: Make Terraform Unlock Script Executable
+        run: chmod +x ./wait-for-terraform-unlock.sh
+
+      - name: Ensure Terraform State Lock is Released
+        run: ./wait-for-terraform-unlock.sh ${{ vars.TF_STATE_BUCKET }} ${{ vars.LOCK_ID }}
+        continue-on-error: true
+
+      - name: Terraform Plan
+        run: |
+          terraform plan \
+            -var="project_id=${{ vars.GCP_PROJECT_ID }}" \
+            -var="app_name=${{ vars.APP_NAME }}" \
+            -var="region=${{ vars.GKE_REGION }}" \
+            -var="node_count=${{ vars.NODE_COUNT }}" \
+            -var="node_pool_name=${{ vars.NODE_POOL_NAME }}" \
+            -var="machine_type=${{ vars.MACHINE_TYPE }}" \
+            -var="cluster_name=${{ vars.APP_NAME }}-cluster" \
+            -var="service_name=${{ vars.APP_NAME }}-service" \
+            -out=tfplan        
+
+      - name: Terraform Apply
+        run: terraform apply -auto-approve tfplan
+
+      - name: Set up GKE Credentials
+        run: gcloud container clusters get-credentials ${{ vars.APP_NAME }}-cluster --region ${{ vars.GKE_REGION }} --project ${{ vars.GCP_PROJECT_ID }}
+
+      - name: Verify Kubernetes Connection
+        run: |
+          kubectl config view
+          kubectl get nodes
+          kubectl cluster-info
+          kubectl get all --all-namespaces
+
+      - name: Deploy to GKE
+        uses: google-github-actions/deploy-gke@v0.0.3
+        with:
+          project_id: ${{ vars.GCP_PROJECT_ID }}
+          cluster_name: ${{ vars.APP_NAME }}-cluster
+          region: ${{ vars.GKE_REGION }}
+          image: ${{ vars.DOCKERHUB_USERNAME }}/${{ vars.APP_NAME }}:latest
+          app_name: ${{ vars.APP_NAME }}

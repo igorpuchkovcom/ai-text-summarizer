@@ -1,0 +1,19 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: text-summarizer
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: text-summarizer
+  template:
+    metadata:
+      labels:
+        app: text-summarizer
+    spec:
+      containers:
+      - name: text-summarizer
+        image: igorpuchkov/text-summarizer:latest
+        ports:
+        - containerPort: 8000
